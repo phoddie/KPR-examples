@@ -35,10 +35,8 @@ var TRACE_ERRORS = false;
 var DEBUG_COMMUNICATION = false;
 
 var type;
-var last_command;
 var last_uid;
 var sam_mode;
-var gLastTransceiveTime;
 
 exports.configure = function(configuration) {
     initializeGlobalConstants();
@@ -54,7 +52,6 @@ exports.configure = function(configuration) {
     type = undefined;
     sam_mode = PSM_NORMAL;
     last_uid = undefined;
-    gLastTransceiveTime = Date.now() - 200;
 
     if (!doCheckCommunication.call(this)) {
         trace_err("communication check failed\n");
@@ -151,24 +148,15 @@ function transceive(request, responseSize)
 {
     trace_comm("transceive command " + request[0] + ", responseSize " + responseSize + "\n");
 
-	var now = Date.now(), nextTransceiveTime = gLastTransceiveTime + 50;		//@@ is 50 reasonable?
-	if (now < nextTransceiveTime)
-    	sensorUtils.mdelay(nextTransceiveTime - now);
-
     if (send.call(this, request)) {
-        last_command = request[0];
-
-        var result = receive.call(this, responseSize);
+        var result = receive.call(this, responseSize, request[0]);
 
         //@@ retry support goes here @@
 
         trace_comm("transceive returns: " + JSON.stringify(result) + "\n");
-        gLastTransceiveTime = Date.now();
 
         return result;
     }
-
-	gLastTransceiveTime = Date.now();
 }
 
 function send(request)
@@ -192,10 +180,10 @@ function send(request)
     return readyFrame;
 }
 
-function receive(responseSize)
+function receive(responseSize, lastCommand)
 {
-trace_comm("receive START, responseSize = " + responseSize + "\n");
-//    var frame = waitReadyFrame.call(this, PN53x_EXTENDED_FRAME__DATA_MAX_LEN);        // if non-blocking i2c read
+	trace_comm("receive START, responseSize = " + responseSize + "\n");
+//  var frame = waitReadyFrame.call(this, PN53x_EXTENDED_FRAME__DATA_MAX_LEN);        // if non-blocking i2c read
     var frame = waitReadyFrame.call(this, 5 + 2 + responseSize + 2);
 
     if (!frame || (0 == frame.length)) {
@@ -236,7 +224,7 @@ trace_comm("receive START, responseSize = " + responseSize + "\n");
         return;
     }
     
-    if (frame[TFI_idx + 1] != (last_command + 1)) {
+    if (frame[TFI_idx + 1] != (lastCommand + 1)) {
         trace_err("Command code verification failed\n");
         return;
     }
@@ -252,12 +240,12 @@ trace_comm("receive START, responseSize = " + responseSize + "\n");
         trace_err("Data checksum mismatch\n");
         return;
     }
-/*
+
     if (0 != frame[TFI_idx + length + 1]) {
-        trace("Frame postamble mismatch\n");
+        trace_err("Frame postamble mismatch\n");
         return;
     }
-*/
+
     trace_comm("receive STOP - slice remains\n");
 
     return frame.slice(TFI_idx + 2, TFI_idx + length);
@@ -293,7 +281,6 @@ function waitReadyFrame(responseSize)
 {
     var stop = Date.now() + 100;       /// @@ timeout = 100 ms - perhaps allow client to configure based on responsiveness needed
     trace_comm("waitReady start, responseSize " + responseSize + "\n");
-    sensorUtils.mdelay(10);
 
     do {
         trace_comm("waitReady readBlock start\n");
