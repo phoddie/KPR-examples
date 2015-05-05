@@ -19,6 +19,8 @@ var nfcTokenStyle = new Style({ font:"bold 40px", color:"white", horizontal:"cen
 var infoStyle = new Style({ font:"bold 25px", color:"white", horizontal:"center", vertical:"bottom" });
 var errorStyle = new Style({ font:"bold 40px", color:"white", horizontal:"center", vertical:"middle" });
 
+var pageNumber = 6;
+
 var NFCScreen = Container.template(function($) { return {
 	left:0, right:0, top:0, bottom:0, skin: new Skin({ fill: "#76b321" }),
 	contents: [
@@ -37,54 +39,39 @@ var ErrorScreen = Container.template(function($) { return {
 
 Handler.bind("/nfcTarget", {
 	onInvoke: function(handler, message) {
-		var data = model.data;
 		var it = message.requestObject;
-        data.token = it;
-        data.read = false;
-        data.written = false;
-        application.replace(application.first, new NFCScreen({token: JSON.stringify(data.token), count: "", lastTime: ""}));
+       	var token = it.token;
 
-        if (data.token.length) {
-            var message = new MessageWithObject("pins:/nfc/mifare_CmdRead", {page: 6, token: data.token, key: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff]});
-            handler.invoke(message, Message.JSON);
-        }
+		if (!token)
+        	application.replace(application.first, new NFCScreen({token: "Scanning", count: "", lastTime: ""}));
+        else 
+        if (!it.commandData || ("number" == typeof it.commandData))
+        	application.replace(application.first, new NFCScreen({token: token, count: "(read failed " + it.commandData + ")", lastTime: ""}));
+        else {
+			var bytes = it.commandData;
+            if (('K' != String.fromCharCode(bytes[0])) || ('N' != String.fromCharCode(bytes[1])) ||
+                ('M' != String.fromCharCode(bytes[2])) || ('A' != String.fromCharCode(bytes[3])))
+                bytes = ['K'.charCodeAt(0), 'N'.charCodeAt(0), 'M'.charCodeAt(0), 'A'.charCodeAt(0), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+            var count = (bytes[4] << 8) | bytes[5];
+            count += 1;
+            bytes[4] = (count >> 8) & 0xff;
+            bytes[5] = count & 0xff;
+         
+            var lastTime = (bytes[6] << 24) | (bytes[7] << 16) | (bytes[8] << 8) | bytes[9];
+            var now = (Date.now() / 1000) | 0;
+            bytes[6] = (now >> 24) & 0xff;
+            bytes[7] = (now >> 16) & 0xff;
+            bytes[8] = (now >>  8) & 0xff;
+            bytes[9] = (now >>  0) & 0xff;
+
+            handler.invoke(new MessageWithObject("pins:/nfc/mifare_CmdWrite", {page: pageNumber, data: bytes, token: token, key: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff]}), Message.JSON);
+
+	        application.replace(application.first, new NFCScreen({token: JSON.stringify(token), count: "Times seen: " + (count - 1), lastTime: "Last seen: " + (new Date(lastTime * 1000))}));
+		}
 	},
     onComplete: function(handler, message, result) {
-		var data = model.data;
-
-        if (!data.read) {
-            data.read = true;
-
-            if (result && (result.length >= 10)) {
-                var bytes = result;
-
-                if (('K' != String.fromCharCode(result[0])) || ('N' != String.fromCharCode(result[1])) ||
-                    ('M' != String.fromCharCode(result[2])) || ('A' != String.fromCharCode(result[3])))
-                    bytes = ['K'.charCodeAt(0), 'N'.charCodeAt(0), 'M'.charCodeAt(0), 'A'.charCodeAt(0), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-
-                var count = (bytes[4] << 8) | bytes[5];
-                count += 1;
-                bytes[4] = (count >> 8) & 0xff;
-                bytes[5] = count & 0xff;
-             
-                var lastTime = (bytes[6] << 24) | (bytes[7] << 16) | (bytes[8] << 8) | bytes[9];
-                var now = (Date.now() / 1000) | 0;
-                bytes[6] = (now >> 24) & 0xff;
-                bytes[7] = (now >> 16) & 0xff;
-                bytes[8] = (now >>  8) & 0xff;
-                bytes[9] = (now >>  0) & 0xff;
-
-                var message = new MessageWithObject("pins:/nfc/mifare_CmdWrite", {page: 6, data: bytes, token: data.token, key: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff]});
-                handler.invoke(message, Message.JSON);
-
-		        application.replace(application.first, new NFCScreen({token: JSON.stringify(data.token), count: "Times seen: " + (count - 1), lastTime: "Last seen: " + (new Date(lastTime * 1000))}));
-            }
-            else
-		        application.replace(application.first, new NFCScreen({token: JSON.stringify(data.token), count: "(read error)", lastTime: ""}));
-        }
-        else if (!data.written) {
-            data.written = true;
-        }
+		trace("nfc write result: " + result + "\n");
     }
 });
 
@@ -93,8 +80,9 @@ var model = application.behavior = Object.create(Object.prototype, {
 		if (0 != message.error)
 			application.replace(application.first, new ErrorScreen(message));
         else {
-            application.invoke(new MessageWithObject("pins:/nfc/poll?repeat=on&callback=/nfcTarget&interval=100"));
-            application.replace(application.first, new NFCScreen({token: "[]", count: "", lastTime: ""}));
+            application.invoke(new MessageWithObject("pins:/nfc/poll?repeat=on&callback=/nfcTarget&interval=100",
+            			{command: "mifare_CmdRead", commandParams: {page: pageNumber, token: null, key: [0xff, 0xff, 0xff, 0xff, 0xff, 0xff]}}));
+            application.replace(application.first, new NFCScreen({token: "Scanning", count: "", lastTime: ""}));
         }
 	}},
 	onLaunch: { value: function(application) {
@@ -107,7 +95,7 @@ var model = application.behavior = Object.create(Object.prototype, {
             }});
         application.invoke(message, Message.TEXT);
 
-		this.data = { token: "(initializing)"};
+		this.data = { token: undefined};
         application.add(new NFCScreen({token: "Initializing", count: "", lastTime: ""}));
 	}},
 });
