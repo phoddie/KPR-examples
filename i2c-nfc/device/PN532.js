@@ -21,8 +21,10 @@
     Based on libnfc and AdaFruit I2C sample
     
     Useful URLs
-       	http://www.nxp.com/documents/user_manual/141520.pdf
-    	https://github.com/adafruit/Adafruit-PN532/blob/master/Adafruit_PN532.cpp
+        http://www.nxp.com/documents/user_manual/141520.pdf
+        https://github.com/adafruit/Adafruit-PN532/blob/master/Adafruit_PN532.cpp
+        http://mifareclassicdetectiononandroid.blogspot.it
+        http://www.nxp.com/documents/application_note/055020.pdf
 */
 
 
@@ -74,7 +76,7 @@ exports.close = function() {
     this.data.close();
 }
 
-exports.poll = function() {
+exports.poll = function(params) {
     trace_cmd("PN532 Read BEGIN\n");
     var changed = false, uid, result;
 
@@ -85,12 +87,12 @@ exports.poll = function() {
     // if active device changed, return uid (or empty uid) to caller
     if (!last_uid && uid) {
         changed = true;
-        result = uid;
+        result = {token: uid};
         last_uid = uid;
     }
     else if (last_uid && !uid) {
         changed = true;
-        result = [];
+        result = {token: undefined};
         last_uid = undefined;
     }
     else if (!last_uid && !uid)
@@ -101,12 +103,18 @@ exports.poll = function() {
             changed = last_uid[i] != uid[i];
 
         if (changed) {
-            result = uid;
+            result = {token: uid};
             last_uid = uid;
         }
     }
 
-    trace_cmd("PN532 Read END, UID: " + result + "\n");
+	if (params && ("command" in params) && changed && last_uid) {
+		if ("token" in params.commandParams)
+			params.commandParams.token = last_uid;
+		result.commandData = this[params.command](params.commandParams);
+	}
+
+    trace_cmd("PN532 Read END, UID: " + last_uid + "\n");
 
     return result;
 }
@@ -142,6 +150,70 @@ exports.mifare_CmdWrite = function(params) {
     trace_cmd("doInDataExchange MIFARE_CMD_WRITE: " + JSON.stringify(result) + "\n");
 
     return result ? result[0] : -1;
+}
+
+exports.mifare_ReadString = function(params) {
+	var data = "";
+	var page = snapToDataPage(params.page);
+
+	var sector = Math.floor(page / 4);
+	var result = this.mifare_CmdRead({page: page, key: params.key, token: params.token});
+	if (result < 0) return result;
+
+	if (('S' != String.fromCharCode(result[0])) || ('t' != String.fromCharCode(result[1])) || ('r' != String.fromCharCode(result[2])))
+		return "";	 
+
+	var pages = result[3];
+
+	for (var i = 4; i < 16; i++) {
+		if (!result[i]) return data;
+		data += String.fromCharCode(result[i]);
+	}
+	
+	for (pages--; pages > 0; pages--) {
+		page = snapToDataPage(page + 1);
+		var thisSector = Math.floor(page / 4);
+		if (thisSector != sector) {
+			sector = thisSector;
+			result = this.mifare_CmdRead({page: page, key: params.key, token: params.token});
+		}
+		else
+			result = this.mifare_CmdRead({page: page});
+		if (result < 0) return result;
+
+		for (var i = 0; i < 16; i++) {
+			if (!result[i]) break;
+			data += String.fromCharCode(result[i]);
+		}
+	}
+	
+	return data;
+}
+
+exports.mifare_WriteString = function(params) {
+	var pages = "Str" + String.fromCharCode(Math.ceil((3 + 1 + params.data.length) / 16)) + params.data;	// 4 byte header - "Str" and page count
+	var page = snapToDataPage(params.page);
+	var data = new Array(16);
+
+	for (var index = 0, count = pages.length; count > 0; count -= 16, page = snapToDataPage(page + 1)) {
+		var i = 0;
+
+		for (var length = (count > 16) ? 16 : count; i < length; i++, index++)
+			data[i] = pages.charCodeAt(index);
+		for (; i < 16; i++)
+			data[i] = 0;
+
+		var result = this.mifare_CmdWrite({data: data, page: page, key: params.key, token: params.token});
+		if (result < 0)
+			return result;
+	}
+
+	return 0;
+}
+
+function snapToDataPage(page)
+{
+	return (3 == (page % 4)) ? page + 1 : page;	// skip over the authentication page at end of sector
 }
 
 function transceive(request, responseSize)
