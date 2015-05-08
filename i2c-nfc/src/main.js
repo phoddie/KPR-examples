@@ -75,6 +75,19 @@ Handler.bind("/nfcTarget", {
     }
 });
 
+// Relay between http and NFC BLL 
+Handler.bind("/nfc", {
+    onInvoke: function(handler, message) {
+        request = JSON.parse(message.requestText);
+        handler.invoke(new MessageWithObject("pins:/nfc/" + request.command, request.commandParams), Message.JSON);
+    },
+    onComplete: function(handler, message, result) {
+    	handler.message.responseType = "application/json";
+    	handler.message.responseText = JSON.stringify(result);
+    	handler.message.status = 200;
+    }
+});
+
 var model = application.behavior = Object.create(Object.prototype, {
 	onComplete: { value: function(application, message, text) {
 		if (0 != message.error)
@@ -86,6 +99,8 @@ var model = application.behavior = Object.create(Object.prototype, {
         }
 	}},
 	onLaunch: { value: function(application) {
+		application.share({port: 10010});
+
         var message = new MessageWithObject("pins:configure", {
             nfc: {
                 require: "PN532",
@@ -97,5 +112,15 @@ var model = application.behavior = Object.create(Object.prototype, {
 
 		this.data = { token: undefined};
         application.add(new NFCScreen({token: "Initializing", count: "", lastTime: ""}));
+	}},
+	// map unhandled http requests to src/htdocs directory
+	onInvoke: { value: function(application, message) {
+		var path = mergeURI(application.url, "htdocs" + (("/" == message.path) ? "/index.html" : message.path))
+		if (Files.exists(path)) {
+			message.setResponseHeader("Content-Type", "text/html");
+			message.responsePath = path;
+		}
+		else
+			message.status = 404;
 	}},
 });
