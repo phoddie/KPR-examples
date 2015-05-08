@@ -1,0 +1,125 @@
+<html>
+<head>
+    <title>Poller</title>
+    
+    <style type="text/css" media="screen">
+      #messages{ width: 300px; float: left; }
+      #formArea { width: 300px; float: right; color: black; padding: 20px; border: solid 1px black; text-align: center;}
+      #programButton {background-color:#FF0004; padding: 14px; color: white; display: none;}
+      #programButton.show {display: block;}
+      body{ background:white;color:white;font-size:.9em; }
+     .msg{ background:#aaa;padding:.2em; border-bottom:1px #000 solid}
+     .old{ background-color:#246499;}
+     .new{ background-color:#3B9957;}
+     .error{ background-color:#992E36;}
+    </style>
+</head>
+<body>
+    <div id="formArea">
+        Form Area
+        <br />
+        <div id="programButton">
+          Program Card
+        </div>
+    </div>
+    
+    <div id="messages">
+        <div class="msg old">
+            Poll Create with NFC reader/writer
+        </div>
+    </div>
+    
+    
+</body>
+
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.2.6/jquery.min.js" type="text/javascript" charset="utf-8"></script>
+
+
+<script type="text/javascript" charset="utf-8">
+function addmsg(type, msg){
+    /* Simple helper to add a div.
+    type is the name of a CSS class (old/new/error).
+    msg is the contents of the div */
+    $("#messages").append(
+        "<div class='msg "+ type +"'>"+ msg +"</div>"
+    );
+}
+
+function waitForMsg(){
+    /* This requests the url "msgsrv.php"
+    When it complete (or errors)*/
+    $.ajax({
+        type: "PUT",
+        url: "/nfc",
+        contentType: "application/json",
+        data: '{"command": "getCard", "commandParams": null}',
+
+        async: true, /* If set to non-async, browser shows page as "Loading.."*/
+        cache: false,
+        timeout:30000, /* Timeout in ms */
+
+        success: function(data){ /* called when request to poll-server.php completes */
+            addmsg("new", data); /* Add response to a .msg div (with the "new" class)*/
+            //
+            try {
+              data = JSON.parse(data);
+            }
+            catch(e) {
+              data = {};
+            }
+            //console.log(JSON.stringify(data));
+            if (data.token) {
+                // we have a card
+                console.log("OK");
+                document.getElementById("programButton").className += " show";
+            }
+            else {
+                // we have nothing
+                console.log("empty");
+            }
+            // if string or integer
+//                var card = data.card || 0; // integer value or you could have a string value for default
+//                switch (card) {
+//                    case "red":
+//                      // do the red thing
+//                      break;
+//                    case "green":
+//                      // do the green thing
+//                      break;
+//                    default:
+//                      // do the unknown thing
+//                      break;
+//                }
+//               
+//                // option b
+//                if (card < 10) {
+//                      // do the red thing
+//                }
+//                else if (card < 100) {
+//                      // do the green thing
+//                }
+//                else {
+                  // do the unknown thing
+//                }
+            //
+            setTimeout(
+                waitForMsg, /* Request next message */
+                1000 /* ..after 1 seconds */
+            );
+        },
+        error: function(XMLHttpRequest, textStatus, errorThrown){
+            addmsg("error", textStatus + " (" + errorThrown + ")");
+            setTimeout(
+                waitForMsg, /* Try again after.. */
+                1000); /* milliseconds (15seconds) */
+        }
+    });
+};
+
+$(document).ready(function(){
+    waitForMsg(); /* Start the inital request */
+});
+</script>
+    
+    
+</html>
