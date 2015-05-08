@@ -21,10 +21,10 @@
     Based on libnfc and AdaFruit I2C sample
     
     Useful URLs
-        http://www.nxp.com/documents/user_manual/141520.pdf
-        https://github.com/adafruit/Adafruit-PN532/blob/master/Adafruit_PN532.cpp
-        http://mifareclassicdetectiononandroid.blogspot.it
-        http://www.nxp.com/documents/application_note/055020.pdf
+		http://www.nxp.com/documents/user_manual/141520.pdf
+		https://github.com/adafruit/Adafruit-PN532/blob/master/Adafruit_PN532.cpp
+		http://mifareclassicdetectiononandroid.blogspot.it
+		http://www.nxp.com/documents/application_note/055020.pdf
 */
 
 
@@ -74,6 +74,13 @@ exports.configure = function(configuration) {
 
 exports.close = function() {
     this.data.close();
+}
+
+exports.getCard = function() {
+    var target = doInListPassiveTarget.call(this, PM_ISO14443A_106, 1);
+    if (target)
+        return {token: target.slice(6, 6 + target[5])};
+    return {token: undefined};
 }
 
 exports.poll = function(params) {
