@@ -40,7 +40,7 @@ exports.configure = function(configuration) {
 			name : "PN532",
 			iconVariant : PinsSimulators.SENSOR_KNOB 
 		},
-		value: -1,
+		value: undefined,
 		last: undefined,
 		authorized: false
 	};
@@ -51,12 +51,23 @@ exports.close = function() {
 	shell.delegate("removeSimulatorPart", this.container);
 }
 
-exports.poll = function() {
+exports.poll = function(params) {
     var data = this.data;
     if (data.last == data.value) return;
-
     data.last = data.value;
-    return (-1 === data.value) ? [] : data.value;
+
+	var result = {token: data.value};
+	if (params && ("command" in params) && data.value) {
+		if ("token" in params.commandParams)
+			params.commandParams.token = data.value;
+		result.commandData = this[params.command](params.commandParams);
+	}
+
+    return result;
+}
+
+exports.getCard = function() {
+	return {token: this.data.value};
 }
 
 exports.mifare_CmdAuthA = function(params) {
@@ -76,25 +87,32 @@ exports.mifare_CmdAuthA = function(params) {
 }
 
 exports.mifare_CmdRead = function(params) {
+	if (("key" in params) && ("token" in params)) {
+		if (-1 == this.mifare_CmdAuthA(params))
+			return -1;
+	}
+
     if (false == this.data.authorized)
         return -1;
 
     if ((params.page < 0) || (params.page > 63))
         return -1;
 
-    var page = this.data.token.pages[params.page];
+    var page = (params.page < this.data.token.pages.length) ? this.data.token.pages[params.page] : undefined;
     if (undefined == page)
         this.data.token.pages[params.page] = page = [];
     
     for (var i = page.length; i < 16; i++)
         page[i] = 0;
-
+	
     return page;
 }
 
 exports.mifare_CmdWrite = function(params) {
-    if (false == this.data.authorized)
-        return -1;
+	if (("key" in params) && ("token" in params)) {
+		if (-1 == this.mifare_CmdAuthA(params))
+			return -1;
+	}
 
     if (false == this.data.authorized)
         return -1;
@@ -154,7 +172,7 @@ var TokensList = Column.template(function($) { return {
 	left:0, right:0,
 	contents: [
 		Label($, { left:0, right:0, top:0, height:30, style:THEME.labeledButtonStyle, string:"NFC Tokens" }),
-        NFCTokenButton({ data:$, string:"[ ] (no token)", value: -1 }, {  })
+        NFCTokenButton({ data:$, string:"[ ] (no token)", value: undefined }, {  })
 	],
 }});
 
