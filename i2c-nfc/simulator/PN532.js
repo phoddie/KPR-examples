@@ -70,6 +70,70 @@ exports.getCard = function() {
 	return {token: this.data.value};
 }
 
+exports.mifare_ReadString = function(params) {
+	var data = "";
+	var page = snapToDataPage(params.page);
+
+	var sector = Math.floor(page / 4);
+	var result = this.mifare_CmdRead({page: page, key: params.key, token: params.token});
+	if (result < 0) return result;
+
+	if (('S' != String.fromCharCode(result[0])) || ('t' != String.fromCharCode(result[1])) || ('r' != String.fromCharCode(result[2])))
+		return "";	 
+
+	var pages = result[3];
+
+	for (var i = 4; i < 16; i++) {
+		if (!result[i]) return data;
+		data += String.fromCharCode(result[i]);
+	}
+	
+	for (pages--; pages > 0; pages--) {
+		page = snapToDataPage(page + 1);
+		var thisSector = Math.floor(page / 4);
+		if (thisSector != sector) {
+			sector = thisSector;
+			result = this.mifare_CmdRead({page: page, key: params.key, token: params.token});
+		}
+		else
+			result = this.mifare_CmdRead({page: page});
+		if (result < 0) return result;
+
+		for (var i = 0; i < 16; i++) {
+			if (!result[i]) break;
+			data += String.fromCharCode(result[i]);
+		}
+	}
+	
+	return data;
+}
+
+exports.mifare_WriteString = function(params) {
+	var pages = "Str" + String.fromCharCode(Math.ceil((3 + 1 + params.data.length) / 16)) + params.data;	// 4 byte header - "Str" and page count
+	var page = snapToDataPage(params.page);
+	var data = new Array(16);
+
+	for (var index = 0, count = pages.length; count > 0; count -= 16, page = snapToDataPage(page + 1)) {
+		var i = 0;
+
+		for (var length = (count > 16) ? 16 : count; i < length; i++, index++)
+			data[i] = pages.charCodeAt(index);
+		for (; i < 16; i++)
+			data[i] = 0;
+
+		var result = this.mifare_CmdWrite({data: data, page: page, key: params.key, token: params.token});
+		if (result < 0)
+			return result;
+	}
+
+	return 0;
+}
+
+function snapToDataPage(page)
+{
+	return (3 == (page % 4)) ? page + 1 : page;	// skip over the authentication page at end of sector
+}
+
 exports.mifare_CmdAuthA = function(params) {
     if (6 != params.key.length)
         return -1;
